@@ -1,0 +1,5 @@
+google-genai
+boto3
+pinecone
+pypdf
+python-jose[cryptography]

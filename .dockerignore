@@ -1,0 +1,10 @@
+.sst
+node_modules
+.git
+.venv
+__pycache__
+*.pyc
+.DS_Store
+zip
+zip-latest
+.env

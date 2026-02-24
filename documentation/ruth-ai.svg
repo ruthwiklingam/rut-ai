@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 850 1000" width="100%" height="100%" style="background-color: #ffffff; font-family: sans-serif;">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#555" />
+    </marker>
+    <style>
+      .userClass { fill: #e1f5fe; stroke: #81d4fa; stroke-width: 2px; rx: 8px; }
+      .frontendClass { fill: #f3e5f5; stroke: #ce93d8; stroke-width: 2px; rx: 8px; }
+      .lambdaClass { fill: #fff3e0; stroke: #ffcc80; stroke-width: 2px; rx: 8px; }
+      .storageClass { fill: #e8f5e8; stroke: #a5d6a7; stroke-width: 2px; rx: 8px; }
+      .externalClass { fill: #fce4ec; stroke: #f48fb1; stroke-width: 2px; rx: 8px; }
+      .textTitle { font-size: 16px; font-weight: bold; fill: #333; text-anchor: middle; }
+      .textSub { font-size: 12px; fill: #555; text-anchor: middle; }
+      .pathLine { stroke: #555; stroke-width: 2px; fill: none; marker-end: url(#arrow); }
+      .pathLabel { font-size: 11px; fill: #666; background: white; text-anchor: middle; }
+    </style>
+  </defs>
+
+  <g transform="translate(325, 20)">
+    <rect class="userClass" width="200" height="50" />
+    <text class="textTitle" x="100" y="32">👤 User</text>
+  </g>
+
+  <g transform="translate(325, 130)">
+    <rect class="frontendClass" width="200" height="70" />
+    <text class="textTitle" x="100" y="30">🖥️ Vue.js Frontend</text>
+    <text class="textSub" x="100" y="50">File Upload &amp; Chat</text>
+  </g>
+
+  <g transform="translate(50, 280)">
+    <rect class="lambdaClass" width="220" height="70" />
+    <text class="textTitle" x="110" y="30">📤 Upload Lambda</text>
+    <text class="textSub" x="110" y="50">src/upload.py</text>
+  </g>
+
+  <g transform="translate(580, 280)">
+    <rect class="lambdaClass" width="220" height="70" />
+    <text class="textTitle" x="110" y="30">💬 Chat Lambda</text>
+    <text class="textSub" x="110" y="50">src/chat.py</text>
+  </g>
+
+  <g transform="translate(50, 440)">
+    <rect class="storageClass" width="220" height="60" />
+    <text class="textTitle" x="110" y="28">📦 S3 Bucket</text>
+    <text class="textSub" x="110" y="46">Documents</text>
+  </g>
+
+  <g transform="translate(580, 440)">
+    <rect class="storageClass" width="220" height="60" />
+    <text class="textTitle" x="110" y="28">🗃️ DynamoDB</text>
+    <text class="textSub" x="110" y="46">Chat History</text>
+  </g>
+
+  <g transform="translate(50, 580)">
+    <rect class="lambdaClass" width="220" height="80" />
+    <text class="textTitle" x="110" y="30">⚙️ Ingest Lambda</text>
+    <text class="textSub" x="110" y="50">PDF Processing</text>
+    <text class="textSub" x="110" y="65">Vector Generation</text>
+  </g>
+
+  <g transform="translate(315, 740)">
+    <rect class="externalClass" width="220" height="70" />
+    <text class="textTitle" x="110" y="30">🔍 Pinecone</text>
+    <text class="textSub" x="110" y="50">Vector Database</text>
+  </g>
+
+  <g transform="translate(315, 880)">
+    <rect class="externalClass" width="220" height="70" />
+    <text class="textTitle" x="110" y="30">🤖 Google Gemini API</text>
+    <text class="textSub" x="110" y="50">Embedding &amp; Flash Models</text>
+  </g>
+
+  <path class="pathLine" d="M 425 70 L 425 120" />
+  <text class="pathLabel" x="425" y="100">1. Upload / A. Chat</text>
+
+  <path class="pathLine" d="M 325 165 L 160 165 L 160 270" />
+  <text class="pathLabel" x="240" y="155">2. POST /upload</text>
+
+  <path class="pathLine" d="M 525 165 L 690 165 L 690 270" />
+  <text class="pathLabel" x="610" y="155">B. POST /chat</text>
+
+  <path class="pathLine" d="M 160 350 L 160 430" />
+  <text class="pathLabel" x="160" y="400">3. Store Document</text>
+
+  <path class="pathLine" d="M 160 500 L 160 570" />
+  <text class="pathLabel" x="160" y="545">4. object_created</text>
+
+  <path class="pathLine" d="M 160 660 L 160 915 L 305 915" />
+  <text class="pathLabel" x="200" y="905">5. Gen Embeddings</text>
+
+  <path class="pathLine" d="M 270 620 L 425 620 L 425 730" />
+  <text class="pathLabel" x="350" y="610">6. Store Vectors</text>
+
+  <path class="pathLine" d="M 690 350 L 690 430" />
+  <text class="pathLabel" x="690" y="400">C. / I. Chat History</text>
+
+  <path class="pathLine" d="M 690 350 L 690 775 L 545 775" />
+  <text class="pathLabel" x="620" y="765">E. / F. Vector Search</text>
+
+  <path class="pathLine" d="M 800 315 L 830 315 L 830 915 L 545 915" />
+  <text class="pathLabel" x="730" y="905">D. / G. / H. Prompting</text>
+
+</svg>

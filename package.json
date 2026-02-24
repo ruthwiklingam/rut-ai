@@ -1,0 +1,17 @@
+{
+  "name": "ruth-ai",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "sst dev",
+    "build": "sst build",
+    "deploy": "sst deploy",
+    "deploy:dev:bg": "sst deploy --stage dev &",
+    "remove": "sst remove"
+  },
+  "devDependencies": {
+    "sst": "^2.43.7",
+    "aws-cdk-lib": "2.142.1",
+    "constructs": "10.3.0"
+  }
+}
