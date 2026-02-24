@@ -196,39 +196,28 @@ def handler(event, context):
 
 ---
 
-## Part 2: Question Answering (chat.py)
+## Part 2: RAG Search Module (rag.py)
+
+All vector search logic lives in a dedicated `rag.py` module imported by `chat.py`. This keeps `chat.py` focused on request handling and conversation management.
 
 ### Step 1: Initialize Services
 
 ```python
-import json
 import os
-import boto3
-from botocore.exceptions import ClientError
 from google import genai
 from pinecone import Pinecone
-import time
-
-# Initialize DynamoDB for conversation history
-dynamodb = boto3.resource('dynamodb')
-table = dynamodb.Table(os.environ.get('TABLE_NAME'))
 
 # Initialize Gemini client
 client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
-# Initialize Pinecone for document search
+# Initialize Pinecone
 pc = Pinecone(api_key=os.environ.get("PINECONE_API_KEY"))
 index = pc.Index(os.environ.get("PINECONE_INDEX"))
 ```
 
-**Three Systems:**
-1. **DynamoDB**: Stores conversation history
-2. **Gemini**: Generates AI responses
-3. **Pinecone**: Searches document embeddings
-
 ---
 
-### Step 2: Create Embedding Function (Same as Ingest)
+### Step 2: Embedding Function
 
 ```python
 def get_embedding(text):
@@ -254,17 +243,12 @@ def get_embedding(text):
 def search_documents(query, top_k=3):
     """Search Pinecone for relevant document chunks"""
     try:
-        # Convert query to embedding
         query_embedding = get_embedding(query)
-        
-        # Search Pinecone
         results = index.query(
             vector=query_embedding,
             top_k=top_k,
             include_metadata=True
         )
-        
-        # Extract text from results
         contexts = []
         for match in results.matches:
             if match.metadata and 'text' in match.metadata:
@@ -273,7 +257,6 @@ def search_documents(query, top_k=3):
                     'source': match.metadata.get('source', 'unknown'),
                     'score': match.score
                 })
-        
         return contexts
     except Exception as e:
         print(f"Error searching documents: {str(e)}")
@@ -289,36 +272,94 @@ def search_documents(query, top_k=3):
 **Similarity Score:**
 - Cosine similarity: -1 to 1
 - Higher = more relevant
-- Typical relevant matches: 0.7+
+- Only chunks scoring ≥ 0.7 are passed to Gemini as context
 
 ---
 
-### Step 4: Build Context from Retrieved Documents
+### Step 4: Format Context with Threshold Filtering
 
 ```python
-        # Search for relevant documents
-        relevant_docs = search_documents(user_message, top_k=3)
-        
-        # Build context from retrieved documents
-        context = ""
-        if relevant_docs:
-            context = "\n\nRelevant document excerpts:\n"
-            for i, doc in enumerate(relevant_docs, 1):
-                context += f"\n[{i}] From {doc['source']} (relevance: {doc['score']:.2f}):\n{doc['text']}\n"
+def search_and_format_context(user_message, similarity_threshold=0.7):
+    """Search for relevant documents and format them as context."""
+    all_docs = search_documents(user_message, top_k=3)
+
+    # Filter documents that meet the similarity threshold
+    relevant_docs = [doc for doc in all_docs if doc['score'] >= similarity_threshold]
+
+    context = ""
+    if relevant_docs:
+        context = "\n\nRelevant document excerpts:\n"
+        for i, doc in enumerate(relevant_docs, 1):
+            context += f"\n[{i}] From {doc['source']} (relevance: {doc['score']:.2f}):\n{doc['text']}\n"
+
+    return context, relevant_docs
 ```
 
-**Context Construction:**
-- Formats retrieved chunks into readable text
-- Includes source file names
-- Shows relevance scores
-- Numbered for citation
+**Why a threshold?**
+Without filtering, low-relevance chunks add noise to the prompt. Chunks below 0.7 are excluded — if no chunk meets the threshold, `chat.py` falls back to answering from Gemini's general knowledge rather than forcing a hallucinated "document" answer.
 
 ---
 
-### Step 5: Create Enhanced Prompt with Context
+## Part 3: Question Answering (chat.py)
+
+`chat.py` handles HTTP requests, JWT auth, conversation memory, and orchestration. RAG search is delegated entirely to `rag.py`.
+
+### Step 1: Initialize Services
 
 ```python
-        # Create enhanced prompt with context
+import json
+import os
+import boto3
+from botocore.exceptions import ClientError
+from google import genai
+import time
+from rag import search_and_format_context
+from auth import verify_token
+
+# Initialize DynamoDB for conversation history
+dynamodb = boto3.resource('dynamodb')
+table = dynamodb.Table(os.environ.get('TABLE_NAME'))
+
+# Initialize Gemini client
+client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+```
+
+**Two Systems (Pinecone is handled by rag.py):**
+1. **DynamoDB**: Stores conversation history per session
+2. **Gemini**: Generates AI responses
+
+---
+
+### Step 2: Authenticate & Search Documents
+
+Every request is protected by JWT verification before any business logic runs:
+
+```python
+def handler(event, _context):
+    # Handle CORS preflight
+    if event.get("requestContext", {}).get("http", {}).get("method") == "OPTIONS":
+        return {"statusCode": 200, "headers": CORS_HEADERS, "body": ""}
+
+    # Verify Cognito ID token
+    _claims, auth_error = verify_token(event)
+    if auth_error:
+        return auth_error
+
+    body = json.loads(event.get("body", "{}"))
+    user_message = body.get("message", "")
+    session_id = body.get("sessionId", "default-session")
+
+    # Search relevant docs and build context string
+    context, relevant_docs = search_and_format_context(user_message)
+```
+
+**Auth flow:** `verify_token` checks the `Authorization: Bearer <id_token>` header, fetches Cognito's public JWKS (cached per container), and validates the RS256 signature. A 401 is returned immediately if the token is missing, invalid, or expired.
+
+---
+
+### Step 3: Create Enhanced Prompt with Context
+
+```python
         enhanced_message = user_message
         if context:
             enhanced_message = f"""Use the following document excerpts to answer the question. If the answer isn't in the documents, say so.
@@ -334,11 +375,11 @@ Answer:"""
 - Instructs Gemini to use provided documents
 - Tells it to admit when answer isn't in docs
 - Provides clear structure: Context → Question → Answer
-- Prevents hallucination by grounding responses
+- Falls back to `user_message` directly if no relevant docs passed the 0.7 threshold
 
 ---
 
-### Step 6: Get Conversation History
+### Step 4: Get Conversation History
 
 ```python
         # Get conversation history from DynamoDB
@@ -359,7 +400,7 @@ Answer:"""
 
 ---
 
-### Step 7: Generate AI Response
+### Step 5: Generate AI Response
 
 ```python
         # Create chat session with history and send enhanced message
@@ -377,7 +418,7 @@ Answer:"""
 
 ---
 
-### Step 8: Save Messages & Return Response
+### Step 6: Save Messages & Return Response
 
 ```python
         # Save to DynamoDB
@@ -437,14 +478,25 @@ Region: us-east-1 (match Lambda region for low latency)
 ### Environment Variables
 
 ```bash
-# Required for both Ingest and Chat Lambdas:
+# Ingest Lambda:
 GEMINI_API_KEY=your-google-ai-api-key
 PINECONE_API_KEY=your-pinecone-api-key
 PINECONE_INDEX=ruth-documents
 
-# Additional for Chat Lambda:
+# Chat Lambda (all of the above, plus):
 TABLE_NAME=your-dynamodb-table-name
+COGNITO_USER_POOL_ID=us-east-1_XXXXXXXXX
+COGNITO_CLIENT_ID=XXXXXXXXXXXXXXXXXXXXXXXXXX
+COGNITO_REGION=us-east-1
+
+# Upload Lambda:
+BUCKET_NAME=your-s3-bucket-name
+COGNITO_USER_POOL_ID=us-east-1_XXXXXXXXX
+COGNITO_CLIENT_ID=XXXXXXXXXXXXXXXXXXXXXXXXXX
+COGNITO_REGION=us-east-1
 ```
+
+All values are set automatically by SST at deploy time. The Cognito IDs are emitted as stack outputs after `npx sst deploy`.
 
 ---
 
@@ -452,10 +504,25 @@ TABLE_NAME=your-dynamodb-table-name
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
+│                     UPLOAD PIPELINE                          │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  Browser: POST /upload (Auth: Bearer <id_token>)            │
+│           { filename, contentType }                          │
+│                        ↓                                     │
+│  Upload Lambda: generate_presigned_url() → return URL       │
+│                        ↓                                     │
+│  Browser: PUT file binary directly to S3 (no Lambda)        │
+│                        ↓                                     │
+│  S3 object_created → triggers Ingest Lambda                 │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
 │                     INGESTION PIPELINE                       │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
-│  PDF Upload → S3 → Lambda Trigger                           │
+│  S3 Event → Ingest Lambda                                    │
 │                        ↓                                     │
 │              Extract Text (pypdf)                            │
 │                        ↓                                     │
@@ -471,23 +538,25 @@ TABLE_NAME=your-dynamodb-table-name
 │                      QUERY PIPELINE                          │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
-│  User Question → Chat Lambda                                 │
+│  Browser: POST /chat (Auth: Bearer <id_token>)              │
 │                        ↓                                     │
-│    Convert question to embedding                             │
+│  chat.py: verify_token() → 401 if invalid                   │
 │                        ↓                                     │
-│    Search Pinecone (vector similarity)                       │
+│  rag.py: search_and_format_context()                        │
+│    → embed query (gemini-embedding-001)                      │
+│    → Pinecone similarity search (top_k=3)                    │
+│    → filter score ≥ 0.7                                      │
+│    → format context string                                   │
 │                        ↓                                     │
-│    Retrieve top 3 relevant chunks                            │
+│  Build enhanced prompt (context + question)                  │
 │                        ↓                                     │
-│    Build context from chunks                                 │
+│  Load conversation history (DynamoDB, last 10 msgs)         │
 │                        ↓                                     │
-│    Enhanced Prompt = Context + Question                      │
+│  Gemini: generate_content(history + enhanced_prompt)        │
 │                        ↓                                     │
-│    Get conversation history (DynamoDB)                       │
+│  Save user + AI messages to DynamoDB                        │
 │                        ↓                                     │
-│    Send to Gemini (with history + context)                   │
-│                        ↓                                     │
-│    Return answer + sources                                   │
+│  Return { response, sessionId, sources? }                    │
 │                                                              │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -496,21 +565,36 @@ TABLE_NAME=your-dynamodb-table-name
 
 ## 🧪 Testing Your RAG System
 
-### 1. Upload a PDF
+> All HTTP endpoints require `Authorization: Bearer <id_token>`. Obtain an ID token by signing in via the Vue frontend or directly with the Cognito SDK.
 
+### 1. Upload a PDF (Two-Step via Pre-Signed URL)
+
+**Step 1 — Get a pre-signed S3 URL:**
 ```bash
-aws s3 cp sample.pdf s3://your-bucket/sample.pdf \
-  --profile awsdev --region us-east-1
+curl -X POST https://your-upload-lambda-url.com/ \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <id_token>" \
+  -d '{"filename": "sample.pdf", "contentType": "application/pdf"}'
+# Returns: { "uploadUrl": "https://s3.amazonaws.com/...", "key": "<uuid>.pdf" }
 ```
+
+**Step 2 — PUT the file directly to S3:**
+```bash
+curl -X PUT "<uploadUrl>" \
+  -H "Content-Type: application/pdf" \
+  --data-binary @sample.pdf
+```
+
+This bypasses Lambda's 6 MB payload limit entirely.
 
 ### 2. Verify Ingestion Logs
 
 ```bash
-aws logs tail /aws/lambda/your-ingest-function \
+aws logs tail /aws/lambda/ruth-ai-dev-IngestFn \
   --profile awsdev --region us-east-1 --since 5m
 ```
 
-Look for: `Successfully indexed X chunks for sample.pdf`
+Look for: `Successfully indexed X chunks for <uuid>.pdf`
 
 ### 3. Check Pinecone Stats
 
@@ -527,8 +611,9 @@ print(f"Total vectors: {stats.total_vector_count}")
 ### 4. Ask Questions
 
 ```bash
-curl -X POST https://your-lambda-url.com/ \
+curl -X POST https://your-chat-lambda-url.com/ \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <id_token>" \
   -d '{
     "message": "What does the document say about X?",
     "sessionId": "test-123"
@@ -667,15 +752,18 @@ def batch_search(queries, top_k=3):
 ## 🎯 Summary
 
 Your RAG system:
-1. ✅ Ingests PDFs and creates searchable embeddings
-2. ✅ Searches documents using vector similarity
-3. ✅ Retrieves relevant context for user questions
-4. ✅ Generates grounded answers with source citations
-5. ✅ Maintains conversation history
+1. ✅ Uploads files via pre-signed S3 URL (bypasses Lambda 6 MB limit)
+2. ✅ Ingests PDFs and creates searchable embeddings
+3. ✅ Protects all endpoints with Cognito JWT authentication
+4. ✅ Searches documents using vector similarity with a 0.7 threshold
+5. ✅ Retrieves relevant context for user questions
+6. ✅ Generates grounded answers with source citations
+7. ✅ Maintains conversation history per session
+8. ✅ Vue 3 frontend with sign-in / sign-up / confirm flow
 
 **Next steps for improvement:**
 - Add document filtering by type/date
 - Implement hybrid search (keyword + vector)
-- Add citation highlighting
-- Build a frontend UI
-- Add multi-modal support (images, tables)
+- Add citation highlighting in the frontend
+- Add multi-modal support (images, tables in PDFs)
+- Implement chunking with sentence-boundary overlap

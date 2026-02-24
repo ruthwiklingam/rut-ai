@@ -12,8 +12,9 @@ The `ingest.py` file is an **AWS Lambda function** that automatically processes 
 ```python
 import json
 import os
+import io
 import boto3
-import google.generativeai as genai
+from google import genai
 from pinecone import Pinecone
 from pypdf import PdfReader
 ```
@@ -21,12 +22,11 @@ from pypdf import PdfReader
 **What's happening:**
 - `json` - Serialize response bodies for Lambda
 - `os` - Access environment variables (API keys, configuration)
+- `io` - Provides `io.BytesIO` to wrap file bytes as a file-like object for `PdfReader`
 - `boto3` - AWS SDK for Python, used to interact with S3
-- `genai` - Google's Generative AI library for creating embeddings
+- `genai` - Google's Generative AI library (`google-genai` package) for creating embeddings
 - `Pinecone` - Vector database client for storing and querying embeddings
 - `PdfReader` - Extract text content from PDF files
-
-**Note**: There's a missing `import io` that's needed for `io.BytesIO` later in the code.
 
 ---
 
@@ -37,7 +37,7 @@ from pypdf import PdfReader
 s3 = boto3.client('s3')
 pc = Pinecone(api_key=os.environ.get("PINECONE_API_KEY"))
 index = pc.Index(os.environ.get("PINECONE_INDEX"))
-genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
+client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 ```
 
 **What's happening:**
@@ -64,18 +64,18 @@ genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
 def get_embedding(text):
     """Generate vector embedding using Gemini"""
     clean_text = text.replace("\n", " ")
-    return genai.embed_content(
-        model="models/embedding-001",
-        content=clean_text,
-        task_type="retrieve_document"
-    )["embedding"]
+    response = client.models.embed_content(
+        model="gemini-embedding-001",
+        contents=[clean_text]
+    )
+    return response.embeddings[0].values
 ```
 
 **What's happening:**
 - Converts text into a numerical vector (embedding) that captures semantic meaning
 - Preprocesses text by replacing newlines with spaces for better embedding quality
-- Uses Gemini's `embedding-001` model optimized for document retrieval
-- Returns only the embedding array from the API response
+- Uses Gemini's `gemini-embedding-001` model (outputs 3072-dimensional vectors)
+- Calls `client.models.embed_content()` via the `google-genai` SDK and returns the values array
 
 **Input**: Plain text string  
 **Output**: Vector array (list of floats) representing the text's semantic meaning
@@ -316,12 +316,11 @@ except Exception as e:
 
 ## 🐛 Known Issues & Improvements
 
-### Current Issues:
-1. **Missing Import**: `import io` is not included but `io.BytesIO` is used
-2. **No Overlap**: Chunks may split sentences/paragraphs awkwardly
-3. **No Retry Logic**: Transient failures aren't retried due to the "always 200" response strategy
-4. **Memory Constraints**: Loading entire PDFs into memory may fail for very large files
-5. **String Concatenation**: Inefficient for large documents
+### Current Limitations:
+1. **No Overlap**: Chunks may split sentences/paragraphs awkwardly
+2. **No Retry Logic**: Transient failures aren't retried due to the "always 200" response strategy
+3. **Memory Constraints**: Loading entire PDFs into memory may fail for very large files
+4. **String Concatenation**: Inefficient for large documents
 
 ### Potential Improvements:
 ```python
@@ -338,9 +337,6 @@ def chunk_text_with_overlap(text, chunk_size=1000, overlap=200):
 # Efficient text concatenation
 pages_text = [page.extract_text() for page in reader.pages]
 full_text = "\n".join(pages_text)
-
-# Add io import
-import io
 ```
 
 ---
