@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "amazon-cognito-identity-js": "^6.3.16",
     "vue": "^3.3.11"
   },
   "devDependencies": {

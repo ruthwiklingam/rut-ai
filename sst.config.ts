@@ -23,6 +23,17 @@ export default {
       });
       const bucket = new Bucket(stack, "Documents");
 
+      // Allow browsers to PUT files directly to S3 via pre-signed URLs
+      const cfnBucket = bucket.cdk.bucket.node.defaultChild as cdk.aws_s3.CfnBucket;
+      cfnBucket.corsConfiguration = {
+        corsRules: [{
+          allowedOrigins: ["*"],
+          allowedMethods: ["PUT"],
+          allowedHeaders: ["*"],
+          maxAge: 3000,
+        }],
+      };
+
       // Cognito User Pool
       const userPool = new cognito.UserPool(stack, "UserPool", {
         selfSignUpEnabled: true,
@@ -84,6 +95,7 @@ export default {
         timeout: 30,
         url: {
           authorizer: "none",
+          cors: false,
         },
         environment: {
           BUCKET_NAME: bucket.bucketName,
@@ -106,6 +118,7 @@ export default {
         timeout: 30,
         url: {
           authorizer: "none",
+          cors: false,
         },
         environment: {
           GEMINI_API_KEY: process.env.GEMINI_API_KEY!,

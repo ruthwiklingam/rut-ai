@@ -1,9 +1,7 @@
 import json
 import boto3
 import os
-import base64
 import uuid
-from botocore.exceptions import ClientError
 from auth import verify_token
 
 # Initialize S3 client
@@ -28,69 +26,44 @@ def handler(event, _context):
         return auth_error
 
     try:
-        # Parse the incoming request
         body = json.loads(event.get("body", "{}"))
-        
-        # Get file data from the request
-        file_content = body.get("file")
         filename = body.get("filename")
-        content_type = body.get("contentType", "application/pdf")
-        
-        if not file_content or not filename:
+        content_type = body.get("contentType", "application/octet-stream")
+
+        if not filename:
             return {
                 "statusCode": 400,
                 "headers": CORS_HEADERS,
-                "body": json.dumps({"error": "File content and filename are required"})
+                "body": json.dumps({"error": "filename is required"}),
             }
 
-        # Decode base64 file content
-        try:
-            file_data = base64.b64decode(file_content)
-        except Exception as e:
-            return {
-                "statusCode": 400,
-                "headers": CORS_HEADERS,
-                "body": json.dumps({"error": "Invalid file encoding"})
-            }
-        
-        # Generate unique filename to avoid conflicts
-        file_extension = filename.split('.')[-1] if '.' in filename else 'pdf'
-        unique_filename = f"{uuid.uuid4()}.{file_extension}"
-        
-        # Upload to S3
+        file_extension = filename.rsplit(".", 1)[-1] if "." in filename else "bin"
+        key = f"{uuid.uuid4()}.{file_extension}"
         bucket_name = os.environ.get("BUCKET_NAME")
-        
-        s3_client.put_object(
-            Bucket=bucket_name,
-            Key=unique_filename,
-            Body=file_data,
-            ContentType=content_type,
-            Metadata={
-                'original_filename': filename
-            }
+
+        # Generate a pre-signed URL so the browser can PUT the file directly to S3.
+        # This avoids the 6 MB Lambda payload limit entirely.
+        presigned_url = s3_client.generate_presigned_url(
+            "put_object",
+            Params={
+                "Bucket": bucket_name,
+                "Key": key,
+                "ContentType": content_type,
+                "Metadata": {"original_filename": filename},
+            },
+            ExpiresIn=300,  # 5 minutes
         )
-        
+
         return {
             "statusCode": 200,
             "headers": CORS_HEADERS,
-            "body": json.dumps({
-                "message": "File uploaded successfully",
-                "filename": unique_filename,
-                "original_filename": filename
-            })
+            "body": json.dumps({"uploadUrl": presigned_url, "key": key}),
         }
 
-    except ClientError as e:
-        print(f"S3 Error: {e}")
-        return {
-            "statusCode": 500,
-            "headers": CORS_HEADERS,
-            "body": json.dumps({"error": "Failed to upload file to S3"})
-        }
     except Exception as e:
         print(f"Error: {str(e)}")
         return {
             "statusCode": 500,
             "headers": CORS_HEADERS,
-            "body": json.dumps({"error": str(e)})
+            "body": json.dumps({"error": str(e)}),
         }
